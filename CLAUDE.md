@@ -9,7 +9,7 @@ SSH Monitor - 다중 SSH 연결 및 터미널 분할 기능을 제공하는 웹 
 | 영역 | 기술 |
 |------|------|
 | Frontend | Vue 3, TypeScript, Vite, Pinia, xterm.js |
-| Backend | Java 21, Spring Boot 3.2+, JSch |
+| Backend | Java 21, Spring Boot 3.2.14+, Apache MINA SSHD |
 | Infra | Docker, Nginx |
 
 ## 프로젝트 구조

@@ -75,7 +75,7 @@ ssh-monitor/
 | Node.js | 20 LTS | 런타임 |
 | Vue | 3.4+ | UI 프레임워크 |
 | TypeScript | 5.x | 타입 안정성 |
-| Vite | 5.x | 빌드 도구 |
+| Vite | 5.4.19+ | 빌드 도구 |
 | Pinia | 2.x | 상태 관리 |
 | xterm.js | 5.x | 웹 터미널 |
 | xterm-addon-fit | 0.8+ | 터미널 크기 자동 조절 |
@@ -86,9 +86,9 @@ ssh-monitor/
 | 항목 | 버전 | 용도 |
 |------|------|------|
 | Java | 21 LTS | 런타임 |
-| Spring Boot | 3.2+ | 웹 프레임워크 |
+| Spring Boot | 3.2.14+ | 웹 프레임워크 |
 | Spring WebSocket | - | 실시간 통신 |
-| JSch | 0.2.x | SSH 클라이언트 |
+| Apache MINA SSHD | 2.x | SSH 클라이언트 |
 | Lombok | - | 보일러플레이트 제거 |
 | Gradle | 8.x | 빌드 도구 |
 
@@ -98,7 +98,7 @@ ssh-monitor/
 |------|------|------|
 | Docker | 24+ | 컨테이너화 |
 | Docker Compose v2 | (Docker 내장) | 멀티 컨테이너 관리 |
-| Nginx | 1.25+ | 리버스 프록시 (개발/운영) |
+| Nginx | 1.27+ | 리버스 프록시 (개발/운영) |
 
 ---
 
@@ -187,7 +187,7 @@ CMD ["./gradlew", "bootRun", "--no-daemon"]
 ### 3.4 Nginx Dockerfile
 
 ```dockerfile
-FROM nginx:1.25-alpine
+FROM nginx:1.27-alpine
 
 # 기본 설정 제거
 RUN rm /etc/nginx/conf.d/default.conf
