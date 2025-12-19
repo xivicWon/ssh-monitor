@@ -1,0 +1,24 @@
+FROM eclipse-temurin:21-jdk
+
+# Gradle 설치
+RUN apt-get update && apt-get install -y wget unzip && \
+    wget -q https://services.gradle.org/distributions/gradle-8.11.1-bin.zip -O /tmp/gradle.zip && \
+    unzip -q /tmp/gradle.zip -d /opt && \
+    ln -s /opt/gradle-8.11.1/bin/gradle /usr/bin/gradle && \
+    rm /tmp/gradle.zip && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# 빌드 파일 복사 및 의존성 다운로드
+COPY build.gradle .
+COPY settings.gradle .
+
+RUN gradle dependencies --no-daemon || true
+
+# 소스 코드 복사
+COPY src src
+
+EXPOSE 8080
+
+CMD ["gradle", "bootRun", "--no-daemon"]

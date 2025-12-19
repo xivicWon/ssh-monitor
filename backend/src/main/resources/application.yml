@@ -1,0 +1,20 @@
+server:
+  port: 8080
+
+spring:
+  profiles:
+    active: dev
+
+ssh:
+  connection-timeout: 10000
+  command-timeout: 5000
+  session-timeout: 1800000  # 30분
+
+terminal:
+  max-sessions: 10
+  buffer-size: 8192
+
+logging:
+  level:
+    com.sshmonitor: DEBUG
+    org.apache.sshd: INFO
