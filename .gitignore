@@ -6,6 +6,13 @@ dist/
 build/
 *.class
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Generated config files
+vite.config.js
+vite.config.d.ts
+
 # IDE
 .idea/
 *.iml
