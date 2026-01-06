@@ -272,14 +272,22 @@ function initializeTerminal() {
   })
 
   terminalInstance.value.writeln('\x1b[36mSSH Monitor v1.0\x1b[0m')
-  terminalInstance.value.writeln('\x1b[90m연결을 시작합니다...\x1b[0m\r\n')
 
   isInitialized.value = true
 
-  // 연결 시작
-  nextTick(() => {
-    connectToServer()
-  })
+  // autoConnect 플래그가 true인 경우에만 자동 연결 (새로 생성된 세션)
+  if (props.session.autoConnect) {
+    terminalInstance.value.writeln('\x1b[90m연결을 시작합니다...\x1b[0m\r\n')
+    nextTick(() => {
+      connectToServer()
+      // 한 번 연결 후에는 autoConnect 플래그 제거
+      props.session.autoConnect = false
+    })
+  } else {
+    // 복원된 세션의 경우, 사용자에게 안내 메시지 표시
+    terminalInstance.value.writeln('\x1b[90m세션이 복원되었습니다.\x1b[0m')
+    terminalInstance.value.writeln('\x1b[33m연결하려면 아무 키나 입력하세요.\x1b[0m\r\n')
+  }
 }
 
 // 활성 상태 변경 시 fit 호출

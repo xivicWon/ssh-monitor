@@ -16,7 +16,8 @@
       "Bash(npx vue-tsc:*)",
       "Bash(npm install:*)",
       "Bash(npx vite:*)",
-      "Bash(timeout 5 npm run dev:*)"
+      "Bash(timeout 5 npm run dev:*)",
+      "Bash(timeout 5 docker compose logs:*)"
     ]
   }
 }

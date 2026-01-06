@@ -13,7 +13,27 @@ import type {
 } from "@/types";
 
 const STORAGE_KEY = "ssh-monitor-connections";
+const STATE_STORAGE_KEY = "ssh-monitor-state";
 const MAX_HISTORY = 100;
+
+// 저장할 세션 정보 (직렬화 가능한 데이터만)
+interface SerializableSession {
+  id: string;
+  connectionId: string;
+  sessionId: string;
+  status: ConnectionStatus;
+  currentPath: string;
+}
+
+// 저장할 전체 상태
+interface PersistedState {
+  layout: SplitPane;
+  focusedPaneId: string | null;
+  gridCols: number;
+  gridRows: number;
+  sessions: SerializableSession[];
+  activeSessionId: string | null;
+}
 
 export const useConnectionStore = defineStore("connection", () => {
   const connections = ref<SshConnection[]>([]);
@@ -77,6 +97,82 @@ export const useConnectionStore = defineStore("connection", () => {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(connections.value));
     } catch (e) {
       console.error("Failed to save connections to storage:", e);
+    }
+  }
+
+  function saveStateToStorage() {
+    try {
+      // 세션을 직렬화 가능한 형태로 변환
+      const sessions: SerializableSession[] = Array.from(
+        openSessions.value.values()
+      ).map((session) => ({
+        id: session.id,
+        connectionId: session.connectionId,
+        sessionId: session.sessionId,
+        status: session.status,
+        currentPath: session.currentPath,
+      }));
+
+      const state: PersistedState = {
+        layout: layout.value,
+        focusedPaneId: focusedPaneId.value,
+        gridCols: gridCols.value,
+        gridRows: gridRows.value,
+        sessions,
+        activeSessionId: activeSessionId.value,
+      };
+
+      localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+      console.error("Failed to save state to storage:", e);
+    }
+  }
+
+  function loadStateFromStorage() {
+    try {
+      const stored = localStorage.getItem(STATE_STORAGE_KEY);
+      if (!stored) return;
+
+      const state: PersistedState = JSON.parse(stored);
+
+      // 레이아웃 복원
+      layout.value = state.layout;
+      focusedPaneId.value = state.focusedPaneId;
+      gridCols.value = state.gridCols;
+      gridRows.value = state.gridRows;
+
+      // 세션 복원 (연결은 끊어진 상태로 시작)
+      openSessions.value.clear();
+      state.sessions.forEach((sessionData) => {
+        // 연결 정보가 여전히 존재하는지 확인
+        const connection = connections.value.find(
+          (c) => c.id === sessionData.connectionId
+        );
+        if (connection) {
+          const session: TerminalSession = {
+            id: sessionData.id,
+            connectionId: sessionData.connectionId,
+            sessionId: sessionData.sessionId,
+            status: "disconnected", // 새로고침 후에는 연결이 끊어진 상태
+            serverInfo: null,
+            commandHistory: [],
+            currentPath: sessionData.currentPath,
+            directoryEntries: [],
+            isLoadingDirectory: false,
+            autoConnect: false, // 복원된 세션은 자동 연결하지 않음
+          };
+          openSessions.value.set(session.id, session);
+        }
+      });
+
+      activeSessionId.value = state.activeSessionId;
+
+      console.log(
+        "[connectionStore] State restored from localStorage:",
+        state
+      );
+    } catch (e) {
+      console.error("Failed to load state from storage:", e);
     }
   }
 
@@ -246,9 +342,11 @@ export const useConnectionStore = defineStore("connection", () => {
       currentPath: "",
       directoryEntries: [],
       isLoadingDirectory: false,
+      autoConnect: true, // 새로 생성된 세션은 자동 연결
     };
     openSessions.value.set(session.id, session);
     activeSessionId.value = session.id;
+    saveStateToStorage();
     return session;
   }
 
@@ -261,17 +359,20 @@ export const useConnectionStore = defineStore("connection", () => {
         const remaining = Array.from(openSessions.value.keys());
         activeSessionId.value = remaining.length > 0 ? remaining[0] : null;
       }
+      saveStateToStorage();
     }
   }
 
   function setActiveSession(id: string | null) {
     activeSessionId.value = id;
+    saveStateToStorage();
   }
 
   function updateSessionStatus(id: string, status: ConnectionStatus) {
     const session = openSessions.value.get(id);
     if (session) {
       session.status = status;
+      saveStateToStorage();
     }
   }
 
@@ -318,6 +419,7 @@ export const useConnectionStore = defineStore("connection", () => {
     if (session) {
       session.currentPath = path;
       session.directoryEntries = entries;
+      saveStateToStorage();
     }
   }
 
@@ -397,6 +499,7 @@ export const useConnectionStore = defineStore("connection", () => {
 
     // 새 pane에 포커스
     focusedPaneId.value = newPaneId;
+    saveStateToStorage();
   }
 
   function closePane(paneId: string) {
@@ -404,6 +507,7 @@ export const useConnectionStore = defineStore("connection", () => {
     if (layout.value.id === paneId && layout.value.type === "terminal") {
       layout.value.sessionId = undefined;
       focusedPaneId.value = "root";
+      saveStateToStorage();
       return;
     }
 
@@ -434,6 +538,7 @@ export const useConnectionStore = defineStore("connection", () => {
         focusedPaneId.value = firstTerminal?.id || parent.id;
       }
     }
+    saveStateToStorage();
   }
 
   function findFirstTerminalPane(pane: SplitPane): SplitPane | null {
@@ -449,12 +554,14 @@ export const useConnectionStore = defineStore("connection", () => {
 
   function setFocusedPane(paneId: string) {
     focusedPaneId.value = paneId;
+    saveStateToStorage();
   }
 
   function updatePaneSize(paneId: string, size: number) {
     const pane = findPane(layout.value, paneId);
     if (pane) {
       pane.size = Math.max(10, Math.min(90, size));
+      saveStateToStorage();
     }
   }
 
@@ -462,17 +569,20 @@ export const useConnectionStore = defineStore("connection", () => {
     const pane = findPane(layout.value, paneId);
     if (pane && pane.type === "terminal") {
       pane.sessionId = sessionId;
+      saveStateToStorage();
     }
   }
 
   function resetLayout() {
     layout.value = { id: "root", type: "terminal", sessionId: undefined };
     focusedPaneId.value = "root";
+    saveStateToStorage();
   }
 
   function setGridSize(cols: number, rows: number) {
     gridCols.value = Math.max(1, Math.min(4, cols));
     gridRows.value = Math.max(1, Math.min(4, rows));
+    saveStateToStorage();
   }
 
   function reorderSessions(fromSessionId: string, toSessionId: string) {
@@ -487,9 +597,12 @@ export const useConnectionStore = defineStore("connection", () => {
 
     // Map 재구성
     openSessions.value = new Map(sessions);
+    saveStateToStorage();
   }
 
+  // 초기화: connections를 먼저 로드한 후 상태 복원
   loadFromStorage();
+  loadStateFromStorage();
 
   return {
     // 기존 상태

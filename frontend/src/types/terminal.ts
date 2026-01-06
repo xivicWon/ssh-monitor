@@ -92,6 +92,7 @@ export interface TerminalSession {
   currentPath: string
   directoryEntries: DirectoryEntry[]
   isLoadingDirectory: boolean
+  autoConnect?: boolean         // 마운트 시 자동 연결 여부 (새 세션에만 true)
 }
 
 // 분할 화면 레이아웃 타입
