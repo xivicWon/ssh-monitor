@@ -482,9 +482,8 @@ export const useConnectionStore = defineStore("connection", () => {
 
     if (fromIndex === -1 || toIndex === -1) return;
 
-    // 배열에서 요소 이동
-    const [removed] = sessions.splice(fromIndex, 1);
-    sessions.splice(toIndex, 0, removed);
+    // 두 세션의 위치를 스위칭 (swap)
+    [sessions[fromIndex], sessions[toIndex]] = [sessions[toIndex], sessions[fromIndex]];
 
     // Map 재구성
     openSessions.value = new Map(sessions);

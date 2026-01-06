@@ -270,8 +270,10 @@ const gridStyle = computed(() => {
       </div>
 
       <!-- 그리드 레이아웃 -->
-      <div
+      <TransitionGroup
         v-else
+        name="grid"
+        tag="div"
         class="terminal-grid"
         :class="{ 'has-scroll': needsScroll }"
         :style="gridStyle"
@@ -288,11 +290,16 @@ const gridStyle = computed(() => {
           draggable="true"
           @click="switchSession(session.id)"
           @dragstart="handleDragStart($event, session.id)"
-          @dragover="handleDragOver($event, session.id)"
-          @dragleave="handleDragLeave"
-          @drop="handleDrop($event, session.id)"
           @dragend="handleDragEnd"
         >
+          <!-- 드래그 오버레이 (드래그 중일 때만 표시) -->
+          <div
+            v-if="draggedSessionId && draggedSessionId !== session.id"
+            class="drag-overlay"
+            @dragover="handleDragOver($event, session.id)"
+            @dragleave="handleDragLeave"
+            @drop="handleDrop($event, session.id)"
+          />
           <!-- 상단 컨트롤 바 -->
           <div class="terminal-control-bar">
             <div class="control-left">
@@ -379,7 +386,7 @@ const gridStyle = computed(() => {
             </div>
           </div>
         </div>
-      </div>
+      </TransitionGroup>
     </div>
 
     <!-- SSH 연결 팝업 -->
@@ -691,17 +698,6 @@ const gridStyle = computed(() => {
   box-shadow: 0 0 0 1px var(--color-accent);
 }
 
-.terminal-cell.dragging {
-  opacity: 0.5;
-  border-color: var(--color-accent);
-  border-style: dashed;
-}
-
-.terminal-cell.drag-over {
-  border-color: var(--color-success);
-  background: rgba(74, 222, 128, 0.1);
-}
-
 /* 터미널 래퍼 */
 .terminal-wrapper {
   position: absolute;
@@ -1011,5 +1007,84 @@ const gridStyle = computed(() => {
 
 [data-theme="light"] .history-dropdown-empty {
   color: rgba(0, 0, 0, 0.5);
+}
+
+/* Grid 애니메이션 (TransitionGroup) */
+.grid-move {
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.grid-enter-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
+.grid-leave-active {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  position: absolute;
+}
+
+.grid-enter-from {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.grid-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+/* 드래그 오버레이 */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: transparent;
+  cursor: grab;
+}
+
+/* 드래그 중인 셀 스타일 개선 */
+.terminal-cell.dragging {
+  opacity: 0.6;
+  transform: scale(0.98);
+  border-color: var(--color-accent);
+  border-style: dashed;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+  z-index: 100;
+}
+
+/* 드롭 대상 셀 스타일 (스위칭 표시) */
+.terminal-cell.drag-over {
+  border-color: var(--color-success);
+  border-width: 2px;
+  background: rgba(74, 222, 128, 0.15);
+  box-shadow: inset 0 0 20px rgba(74, 222, 128, 0.3), 0 0 0 4px rgba(74, 222, 128, 0.2);
+}
+
+.terminal-cell.drag-over::before {
+  content: '⇄ 위치 교환';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: 8px 16px;
+  background: var(--color-success);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  z-index: 20;
+  pointer-events: none;
+  animation: pulse-badge 1s infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.05);
+    opacity: 0.9;
+  }
 }
 </style>

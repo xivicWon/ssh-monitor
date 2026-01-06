@@ -257,6 +257,10 @@ function initializeTerminal() {
           commandBuffer.value += char
         }
       }
+    } else if (props.session.status === 'disconnected' || props.session.status === 'error') {
+      // 연결이 끊어진 상태에서 키 입력 시 재연결 시도
+      terminalInstance.value?.writeln('\r\n\x1b[33m⟳ 재연결 시도 중...\x1b[0m')
+      connectToServer()
     }
   })
 
