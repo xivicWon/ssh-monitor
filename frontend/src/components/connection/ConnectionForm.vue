@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useConnectionStore } from '@/stores/connectionStore'
 import type { ConnectionFormData, AuthType } from '@/types'
 
@@ -13,6 +13,8 @@ const emit = defineEmits<{
 
 const connectionStore = useConnectionStore()
 
+const isExpanded = ref(true)
+
 const formData = ref<ConnectionFormData>({
   name: '',
   host: '',
@@ -25,7 +27,23 @@ const formData = ref<ConnectionFormData>({
 
 const isEditing = computed(() => props.editingId !== null)
 
-onMounted(() => {
+function toggleExpand() {
+  isExpanded.value = !isExpanded.value
+}
+
+function resetForm() {
+  formData.value = {
+    name: '',
+    host: '',
+    port: 22,
+    username: '',
+    authType: 'password',
+    password: '',
+    privateKey: ''
+  }
+}
+
+function loadEditingData() {
   if (props.editingId) {
     const connection = connectionStore.connections.find(c => c.id === props.editingId)
     if (connection) {
@@ -39,7 +57,18 @@ onMounted(() => {
         privateKey: connection.privateKey || ''
       }
     }
+  } else {
+    resetForm()
   }
+}
+
+watch(() => props.editingId, () => {
+  loadEditingData()
+  isExpanded.value = true
+}, { immediate: false })
+
+onMounted(() => {
+  loadEditingData()
 })
 
 function handleSubmit() {
@@ -82,174 +111,204 @@ function handleAuthTypeChange(type: AuthType) {
 </script>
 
 <template>
-  <div class="form-overlay" @click.self="handleCancel">
-    <div class="form-container">
-      <div class="form-header">
+  <div class="form-panel">
+    <!-- 접기/펼치기 헤더 -->
+    <div class="form-header" @click="toggleExpand">
+      <div class="header-left">
+        <span class="fold-icon" :class="{ expanded: isExpanded }">▶</span>
         <h3>{{ isEditing ? '연결 편집' : '새 연결 추가' }}</h3>
-        <button class="close-btn" @click="handleCancel">✕</button>
       </div>
+      <button class="close-btn" @click.stop="handleCancel" title="닫기">✕</button>
+    </div>
 
-      <form @submit.prevent="handleSubmit">
-        <div class="form-group">
-          <label for="name">연결 이름 *</label>
-          <input
-            id="name"
-            v-model="formData.name"
-            type="text"
-            placeholder="My Server"
-            required
-          />
-        </div>
-
-        <div class="form-row">
-          <div class="form-group flex-grow">
-            <label for="host">호스트 *</label>
+    <!-- 접을 수 있는 폼 내용 -->
+    <Transition name="fold">
+      <div v-show="isExpanded" class="form-content">
+        <form @submit.prevent="handleSubmit">
+          <div class="form-group">
+            <label for="name">연결 이름 *</label>
             <input
-              id="host"
-              v-model="formData.host"
+              id="name"
+              v-model="formData.name"
               type="text"
-              placeholder="192.168.1.100"
+              placeholder="My Server"
               required
             />
           </div>
-          <div class="form-group port-group">
-            <label for="port">포트</label>
+
+          <div class="form-row">
+            <div class="form-group flex-grow">
+              <label for="host">호스트 *</label>
+              <input
+                id="host"
+                v-model="formData.host"
+                type="text"
+                placeholder="192.168.1.100"
+                required
+              />
+            </div>
+            <div class="form-group port-group">
+              <label for="port">포트</label>
+              <input
+                id="port"
+                v-model.number="formData.port"
+                type="number"
+                min="1"
+                max="65535"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="username">사용자명 *</label>
             <input
-              id="port"
-              v-model.number="formData.port"
-              type="number"
-              min="1"
-              max="65535"
+              id="username"
+              v-model="formData.username"
+              type="text"
+              placeholder="root"
+              required
             />
           </div>
-        </div>
 
-        <div class="form-group">
-          <label for="username">사용자명 *</label>
-          <input
-            id="username"
-            v-model="formData.username"
-            type="text"
-            placeholder="root"
-            required
-          />
-        </div>
+          <div class="form-group">
+            <label>인증 방식</label>
+            <div class="auth-toggle">
+              <button
+                type="button"
+                :class="{ active: formData.authType === 'password' }"
+                @click="handleAuthTypeChange('password')"
+              >
+                비밀번호
+              </button>
+              <button
+                type="button"
+                :class="{ active: formData.authType === 'privateKey' }"
+                @click="handleAuthTypeChange('privateKey')"
+              >
+                Private Key
+              </button>
+            </div>
+          </div>
 
-        <div class="form-group">
-          <label>인증 방식</label>
-          <div class="auth-toggle">
-            <button
-              type="button"
-              :class="{ active: formData.authType === 'password' }"
-              @click="handleAuthTypeChange('password')"
-            >
-              비밀번호
+          <div v-if="formData.authType === 'password'" class="form-group">
+            <label for="password">비밀번호 *</label>
+            <input
+              id="password"
+              v-model="formData.password"
+              type="password"
+              placeholder="비밀번호 입력"
+            />
+          </div>
+
+          <div v-if="formData.authType === 'privateKey'" class="form-group">
+            <label for="privateKey">Private Key *</label>
+            <textarea
+              id="privateKey"
+              v-model="formData.privateKey"
+              placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
+              rows="4"
+            />
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="cancel-btn" @click="handleCancel">
+              취소
             </button>
-            <button
-              type="button"
-              :class="{ active: formData.authType === 'privateKey' }"
-              @click="handleAuthTypeChange('privateKey')"
-            >
-              Private Key
+            <button type="submit" class="submit-btn">
+              {{ isEditing ? '저장' : '추가' }}
             </button>
           </div>
-        </div>
-
-        <div v-if="formData.authType === 'password'" class="form-group">
-          <label for="password">비밀번호 *</label>
-          <input
-            id="password"
-            v-model="formData.password"
-            type="password"
-            placeholder="비밀번호 입력"
-          />
-        </div>
-
-        <div v-if="formData.authType === 'privateKey'" class="form-group">
-          <label for="privateKey">Private Key *</label>
-          <textarea
-            id="privateKey"
-            v-model="formData.privateKey"
-            placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;...&#10;-----END RSA PRIVATE KEY-----"
-            rows="6"
-          />
-        </div>
-
-        <div class="form-actions">
-          <button type="button" class="cancel-btn" @click="handleCancel">
-            취소
-          </button>
-          <button type="submit" class="submit-btn">
-            {{ isEditing ? '저장' : '추가' }}
-          </button>
-        </div>
-      </form>
-    </div>
+        </form>
+      </div>
+    </Transition>
   </div>
 </template>
 
 <style scoped>
-.form-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.form-container {
-  background: var(--color-bg-secondary);
-  border-radius: 8px;
-  width: 100%;
-  max-width: 420px;
-  max-height: 90vh;
-  overflow-y: auto;
+.form-panel {
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .form-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 10px 12px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.form-header:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fold-icon {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  transition: transform 0.2s;
+}
+
+.fold-icon.expanded {
+  transform: rotate(90deg);
 }
 
 .form-header h3 {
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
+  color: var(--color-text-primary);
 }
 
 .close-btn {
-  width: 28px;
-  height: 28px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   background: transparent;
-  font-size: 16px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  border-radius: 4px;
+}
+
+.close-btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
+.form-content {
+  overflow: hidden;
 }
 
 form {
-  padding: 20px;
+  padding: 12px;
 }
 
 .form-group {
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .form-group label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.form-group input,
+.form-group textarea {
   font-size: 13px;
-  color: var(--color-text-secondary);
+  padding: 6px 10px;
 }
 
 .form-row {
   display: flex;
-  gap: 12px;
+  gap: 8px;
 }
 
 .flex-grow {
@@ -257,18 +316,19 @@ form {
 }
 
 .port-group {
-  width: 100px;
+  width: 70px;
 }
 
 .auth-toggle {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .auth-toggle button {
   flex: 1;
-  padding: 8px;
-  background: var(--color-bg-tertiary);
+  padding: 6px;
+  font-size: 12px;
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
 }
 
@@ -281,23 +341,40 @@ form {
 textarea {
   resize: vertical;
   font-family: monospace;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .form-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .cancel-btn {
   flex: 1;
-  background: var(--color-bg-tertiary);
+  padding: 6px;
+  font-size: 12px;
+  background: var(--color-bg-secondary);
 }
 
 .submit-btn {
   flex: 1;
+  padding: 6px;
+  font-size: 12px;
   background: var(--color-accent);
   color: var(--color-bg-primary);
+}
+
+/* Fold 트랜지션 */
+.fold-enter-active,
+.fold-leave-active {
+  transition: all 0.2s ease;
+  max-height: 500px;
+}
+
+.fold-enter-from,
+.fold-leave-to {
+  max-height: 0;
+  opacity: 0;
 }
 </style>

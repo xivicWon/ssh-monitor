@@ -1,11 +1,12 @@
 package com.sshmonitor.controller;
 
+import com.sshmonitor.config.WebSocketEventListener;
 import com.sshmonitor.dto.*;
 import com.sshmonitor.service.TerminalSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.SendTo;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
@@ -16,13 +17,21 @@ public class TerminalWebSocketController {
 
     private final TerminalSessionService terminalSessionService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final WebSocketEventListener webSocketEventListener;
 
     @MessageMapping("/terminal/connect")
-    public void connect(TerminalConnectRequest request) {
+    public void connect(TerminalConnectRequest request, SimpMessageHeaderAccessor headerAccessor) {
         log.info("Terminal connect request: {} -> {}@{}:{}",
             request.sessionId(), request.username(), request.host(), request.port());
 
         TerminalMessage response = terminalSessionService.connect(request);
+
+        // SSH 세션을 WebSocket 세션에 등록
+        if ("connected".equals(response.type())) {
+            String wsSessionId = headerAccessor.getSessionId();
+            webSocketEventListener.registerSshSession(wsSessionId, request.sessionId());
+        }
+
         messagingTemplate.convertAndSend(
             "/topic/terminal/" + request.sessionId(),
             response
@@ -36,8 +45,12 @@ public class TerminalWebSocketController {
     }
 
     @MessageMapping("/terminal/disconnect")
-    public void disconnect(TerminalDisconnectRequest request) {
+    public void disconnect(TerminalDisconnectRequest request, SimpMessageHeaderAccessor headerAccessor) {
         log.info("Terminal disconnect request: {}", request.sessionId());
+
+        // SSH 세션 등록 해제
+        String wsSessionId = headerAccessor.getSessionId();
+        webSocketEventListener.unregisterSshSession(wsSessionId, request.sessionId());
 
         TerminalMessage response = terminalSessionService.disconnect(request);
         messagingTemplate.convertAndSend(
