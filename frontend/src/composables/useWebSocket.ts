@@ -1,17 +1,26 @@
 import { ref, onUnmounted } from 'vue'
-import { Client, IMessage } from '@stomp/stompjs'
+import { Client, IMessage, StompSubscription } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 import type { TerminalMessage, TerminalConnectMessage, TerminalInputMessage, TerminalResizeMessage, DirectoryListRequest, DirectoryListResponse } from '@/types'
 
 const WS_URL = import.meta.env.VITE_WS_URL || '/ws'
 
+interface SessionSubscriptions {
+  terminal?: StompSubscription
+  directory?: StompSubscription
+  pwd?: StompSubscription
+}
+
+// 싱글톤 상태 (모든 컴포넌트에서 공유)
+const isConnected = ref(false)
+const client = ref<Client | null>(null)
+const sessionId = ref<string | null>(null) // 레거시 호환용
+const subscriptions = ref<Map<string, SessionSubscriptions>>(new Map())
+
 export function useWebSocket() {
-  const isConnected = ref(false)
-  const client = ref<Client | null>(null)
-  const sessionId = ref<string | null>(null)
 
   function connect(
-    onMessage: (message: TerminalMessage) => void,
+    _onMessage: (message: TerminalMessage) => void,
     onError?: (error: Error) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -42,14 +51,14 @@ export function useWebSocket() {
   function subscribeToSession(
     sId: string,
     onMessage: (message: TerminalMessage) => void
-  ) {
+  ): () => void {
     if (!client.value || !isConnected.value) {
       throw new Error('WebSocket not connected')
     }
 
-    sessionId.value = sId
+    sessionId.value = sId // 레거시 호환
 
-    client.value.subscribe(`/topic/terminal/${sId}`, (message: IMessage) => {
+    const subscription = client.value.subscribe(`/topic/terminal/${sId}`, (message: IMessage) => {
       try {
         const terminalMessage: TerminalMessage = JSON.parse(message.body)
         onMessage(terminalMessage)
@@ -57,6 +66,22 @@ export function useWebSocket() {
         console.error('Failed to parse terminal message:', e)
       }
     })
+
+    // 구독 저장
+    const existing = subscriptions.value.get(sId) || {}
+    subscriptions.value.set(sId, { ...existing, terminal: subscription })
+
+    // unsubscribe 함수 반환
+    return () => {
+      subscription.unsubscribe()
+      const subs = subscriptions.value.get(sId)
+      if (subs) {
+        delete subs.terminal
+        if (!subs.terminal && !subs.directory && !subs.pwd) {
+          subscriptions.value.delete(sId)
+        }
+      }
+    }
   }
 
   function sendConnect(message: TerminalConnectMessage) {
@@ -106,12 +131,12 @@ export function useWebSocket() {
   function subscribeToDirectory(
     sId: string,
     onDirectory: (response: DirectoryListResponse) => void
-  ) {
+  ): (() => void) | undefined {
     if (!client.value || !isConnected.value) {
-      return
+      return undefined
     }
 
-    client.value.subscribe(`/topic/terminal/${sId}/directory`, (message: IMessage) => {
+    const subscription = client.value.subscribe(`/topic/terminal/${sId}/directory`, (message: IMessage) => {
       try {
         const response: DirectoryListResponse = JSON.parse(message.body)
         onDirectory(response)
@@ -119,6 +144,21 @@ export function useWebSocket() {
         console.error('Failed to parse directory response:', e)
       }
     })
+
+    // 구독 저장
+    const existing = subscriptions.value.get(sId) || {}
+    subscriptions.value.set(sId, { ...existing, directory: subscription })
+
+    return () => {
+      subscription.unsubscribe()
+      const subs = subscriptions.value.get(sId)
+      if (subs) {
+        delete subs.directory
+        if (!subs.terminal && !subs.directory && !subs.pwd) {
+          subscriptions.value.delete(sId)
+        }
+      }
+    }
   }
 
   function sendListDirectory(request: DirectoryListRequest) {
@@ -135,14 +175,29 @@ export function useWebSocket() {
   function subscribeToPwd(
     sId: string,
     onPwd: (path: string) => void
-  ) {
+  ): (() => void) | undefined {
     if (!client.value || !isConnected.value) {
-      return
+      return undefined
     }
 
-    client.value.subscribe(`/topic/terminal/${sId}/pwd`, (message: IMessage) => {
+    const subscription = client.value.subscribe(`/topic/terminal/${sId}/pwd`, (message: IMessage) => {
       onPwd(message.body)
     })
+
+    // 구독 저장
+    const existing = subscriptions.value.get(sId) || {}
+    subscriptions.value.set(sId, { ...existing, pwd: subscription })
+
+    return () => {
+      subscription.unsubscribe()
+      const subs = subscriptions.value.get(sId)
+      if (subs) {
+        delete subs.pwd
+        if (!subs.terminal && !subs.directory && !subs.pwd) {
+          subscriptions.value.delete(sId)
+        }
+      }
+    }
   }
 
   function sendPwd(sId: string) {
@@ -156,10 +211,39 @@ export function useWebSocket() {
     })
   }
 
+  // 특정 세션의 모든 구독 해제
+  function unsubscribeSession(sId: string) {
+    const subs = subscriptions.value.get(sId)
+    if (subs) {
+      subs.terminal?.unsubscribe()
+      subs.directory?.unsubscribe()
+      subs.pwd?.unsubscribe()
+      subscriptions.value.delete(sId)
+    }
+  }
+
+  // 특정 세션 연결 해제
+  function disconnectSession(sId: string) {
+    sendDisconnect(sId)
+    unsubscribeSession(sId)
+  }
+
+  // 전체 연결 해제 (레거시 호환 + 모든 세션)
   function disconnect() {
+    // 모든 세션 구독 해제
+    subscriptions.value.forEach((subs, sId) => {
+      sendDisconnect(sId)
+      subs.terminal?.unsubscribe()
+      subs.directory?.unsubscribe()
+      subs.pwd?.unsubscribe()
+    })
+    subscriptions.value.clear()
+
+    // 레거시 단일 세션 처리
     if (sessionId.value) {
       sendDisconnect(sessionId.value)
     }
+
     if (client.value) {
       client.value.deactivate()
       client.value = null
@@ -175,6 +259,7 @@ export function useWebSocket() {
   return {
     isConnected,
     sessionId,
+    subscriptions,
     connect,
     subscribeToSession,
     subscribeToDirectory,
@@ -185,6 +270,8 @@ export function useWebSocket() {
     sendResize,
     sendListDirectory,
     sendPwd,
+    unsubscribeSession,
+    disconnectSession,
     disconnect
   }
 }

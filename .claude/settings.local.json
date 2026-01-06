@@ -10,7 +10,13 @@
       "Bash(docker compose:*)",
       "Bash(docker compose logs:*)",
       "Bash(curl:*)",
-      "Bash(docker-compose logs:*)"
+      "Bash(docker-compose logs:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(npm run build:*)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(npm install:*)",
+      "Bash(npx vite:*)",
+      "Bash(timeout 5 npm run dev:*)"
     ]
   }
 }

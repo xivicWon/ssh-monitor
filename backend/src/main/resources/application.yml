@@ -8,10 +8,10 @@ spring:
 ssh:
   connection-timeout: 10000
   command-timeout: 5000
-  session-timeout: 1800000  # 30분
+  session-timeout: 0  # 0 = 무제한 (타임아웃 비활성화)
 
 terminal:
-  max-sessions: 10
+  max-sessions: 16
   buffer-size: 8192
 
 logging:

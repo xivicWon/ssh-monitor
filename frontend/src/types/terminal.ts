@@ -76,3 +76,32 @@ export interface DirectoryListRequest {
   sessionId: string
   path: string
 }
+
+export interface CommandHistoryItem {
+  command: string
+  timestamp: Date
+}
+
+export interface TerminalSession {
+  id: string                    // 고유 세션 ID (탭 ID)
+  connectionId: string          // SshConnection.id 참조
+  sessionId: string             // WebSocket 세션 ID
+  status: ConnectionStatus
+  serverInfo: import('./connection').ServerInfoResponse | null
+  commandHistory: CommandHistoryItem[]
+  currentPath: string
+  directoryEntries: DirectoryEntry[]
+  isLoadingDirectory: boolean
+}
+
+// 분할 화면 레이아웃 타입
+export type SplitDirection = 'horizontal' | 'vertical'
+
+export interface SplitPane {
+  id: string
+  type: 'terminal' | 'split'
+  sessionId?: string           // type이 'terminal'일 때
+  direction?: SplitDirection   // type이 'split'일 때
+  children?: SplitPane[]       // type이 'split'일 때
+  size?: number                // 비율 (0-100)
+}

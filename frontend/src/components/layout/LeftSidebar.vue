@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 import { useConnectionStore } from '@/stores/connectionStore'
 import ConnectionItem from '../connection/ConnectionItem.vue'
 import ConnectionForm from '../connection/ConnectionForm.vue'
@@ -113,6 +113,13 @@ onUnmounted(() => {
         </button>
       </div>
 
+      <!-- 접을 수 있는 연결 폼 (연결 목록 위에 표시) -->
+      <ConnectionForm
+        v-if="showForm"
+        :editingId="editingId"
+        @close="handleFormClose"
+      />
+
       <div class="connection-list">
         <ConnectionItem
           v-for="conn in connections"
@@ -124,7 +131,7 @@ onUnmounted(() => {
           @delete="handleDelete"
           @clearCredentials="handleClearCredentials"
         />
-        <div v-if="connections.length === 0" class="empty-state">
+        <div v-if="connections.length === 0 && !showForm" class="empty-state">
           <p>연결이 없습니다</p>
           <button @click="handleAddNew">새 연결 추가</button>
         </div>
@@ -154,12 +161,6 @@ onUnmounted(() => {
         <p>SSH 연결 후 디렉토리를 탐색할 수 있습니다</p>
       </div>
     </div>
-
-    <ConnectionForm
-      v-if="showForm"
-      :editingId="editingId"
-      @close="handleFormClose"
-    />
   </div>
 </template>
 

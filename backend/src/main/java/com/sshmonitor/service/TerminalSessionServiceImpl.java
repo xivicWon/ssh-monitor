@@ -171,6 +171,11 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
 
     @Scheduled(fixedRate = 60000)
     public void cleanupExpiredSessions() {
+        // 타임아웃이 0 이하면 세션 만료 비활성화 (무제한 연결)
+        if (sessionTimeout <= 0) {
+            return;
+        }
+
         Instant cutoff = Instant.now().minusMillis(sessionTimeout);
         sessions.entrySet().removeIf(entry -> {
             TerminalSession session = entry.getValue();

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch, ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { computed, watch, ref, nextTick, onUnmounted } from 'vue'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useSshConnection } from '@/composables'
 
