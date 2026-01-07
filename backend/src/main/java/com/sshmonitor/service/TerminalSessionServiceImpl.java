@@ -51,8 +51,12 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
     public TerminalMessage connect(TerminalConnectRequest request) {
         String sessionId = request.sessionId();
 
+        log.info("SSH connection attempt: {} -> {}@{}:{} (auth: {})",
+            sessionId, request.username(), request.host(), request.port(), request.authType());
+
         if (sessions.size() >= maxSessions) {
-            log.warn("Session limit reached: {}", maxSessions);
+            log.warn("Session limit reached: {} | Current: {} | Max: {}",
+                sessionId, sessions.size(), maxSessions);
             return TerminalMessage.error(sessionId, ErrorCode.SESSION_LIMIT.getCode(),
                 "Maximum session limit (" + maxSessions + ") reached");
         }
@@ -64,6 +68,7 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
         }
 
         try {
+            long startTime = System.currentTimeMillis();
             ClientSession clientSession = createClientSession(request);
             ChannelShell channel = createShellChannel(clientSession, request.terminalConfig());
 
@@ -90,12 +95,16 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
             sessions.put(sessionId, terminalSession);
             startOutputReader(sessionId, terminalSession);
 
-            log.info("SSH session connected: {} -> {}@{}:{}",
-                sessionId, request.username(), request.host(), request.port());
+            long connectionTime = System.currentTimeMillis() - startTime;
+            log.info("SSH session connected: {} -> {}@{}:{} | Time: {}ms | Active sessions: {}",
+                sessionId, request.username(), request.host(), request.port(),
+                connectionTime, sessions.size());
 
             return TerminalMessage.connected(sessionId);
         } catch (Exception e) {
-            log.error("Failed to connect SSH session {}: {}", sessionId, e.getMessage(), e);
+            log.error("Failed to connect SSH session: {} -> {}@{}:{} | Error: {} | Type: {}",
+                sessionId, request.username(), request.host(), request.port(),
+                e.getMessage(), e.getClass().getSimpleName(), e);
             ErrorCode errorCode = determineErrorCode(e);
             return TerminalMessage.error(sessionId, errorCode.getCode(), e.getMessage());
         }
@@ -127,7 +136,8 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
     @Override
     public TerminalMessage disconnect(TerminalDisconnectRequest request) {
         String sessionId = request.sessionId();
-        cleanupSession(sessionId);
+        log.info("Manual disconnect requested for session: {}", sessionId);
+        cleanupSession(sessionId, "User requested disconnect");
         return TerminalMessage.disconnected(sessionId);
     }
 
@@ -153,6 +163,10 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
 
     @Override
     public void cleanupSession(String sessionId) {
+        cleanupSession(sessionId, "Manual cleanup");
+    }
+
+    private void cleanupSession(String sessionId, String reason) {
         TerminalSession session = sessions.remove(sessionId);
         if (session != null) {
             session.running = false;
@@ -160,7 +174,14 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
             closeQuietly(session.userOutput);
             closeQuietly(session.channel);
             closeQuietly(session.clientSession);
-            log.info("SSH session cleaned up: {}", sessionId);
+
+            // 연결 끊김 원인 상세 로깅
+            log.info("SSH session cleaned up: {} | Reason: {} | Duration: {}s | LastActivity: {}s ago",
+                sessionId,
+                reason,
+                Duration.between(session.createdAt, Instant.now()).getSeconds(),
+                Duration.between(session.lastActivity, Instant.now()).getSeconds()
+            );
         }
     }
 
@@ -180,13 +201,18 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
         sessions.entrySet().removeIf(entry -> {
             TerminalSession session = entry.getValue();
             if (session.lastActivity.isBefore(cutoff)) {
-                log.info("Cleaning up expired session: {}", entry.getKey());
+                long inactiveSeconds = Duration.between(session.lastActivity, Instant.now()).getSeconds();
+                String reason = String.format("Session timeout (inactive for %ds)", inactiveSeconds);
+
+                log.warn("Cleaning up expired session: {} | Inactive: {}s | Threshold: {}s",
+                    entry.getKey(), inactiveSeconds, sessionTimeout / 1000);
+
                 session.running = false;
                 closeQuietly(session.userInput);
                 closeQuietly(session.userOutput);
                 closeQuietly(session.channel);
                 closeQuietly(session.clientSession);
-                sendStatus(entry.getKey(), "disconnected", "Session expired due to inactivity");
+                sendStatus(entry.getKey(), "disconnected", reason);
                 return true;
             }
             return false;
@@ -195,41 +221,57 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
 
     @Scheduled(fixedRate = 15000)
     public void healthCheckAllSessions() {
+        if (sessions.isEmpty()) {
+            return;
+        }
+
         log.trace("Running health check on {} sessions", sessions.size());
         sessions.forEach((sessionId, session) -> {
-            if (!isSessionHealthy(session)) {
-                log.warn("Unhealthy session detected: {}", sessionId);
-                handleUnhealthySession(sessionId, session);
+            String unhealthyReason = getSessionUnhealthyReason(session);
+            if (unhealthyReason != null) {
+                log.warn("Unhealthy session detected: {} | Reason: {} | LastActivity: {}s ago",
+                    sessionId,
+                    unhealthyReason,
+                    Duration.between(session.lastActivity, Instant.now()).getSeconds()
+                );
+                handleUnhealthySession(sessionId, session, unhealthyReason);
             }
         });
     }
 
-    private boolean isSessionHealthy(TerminalSession session) {
+    private String getSessionUnhealthyReason(TerminalSession session) {
         try {
             // 1. ClientSession이 열려있는지 확인
             if (!session.clientSession.isOpen()) {
-                log.debug("ClientSession is closed for session");
-                return false;
+                return "ClientSession closed";
             }
 
             // 2. ChannelShell이 열려있는지 확인
             if (!session.channel.isOpen()) {
-                log.debug("ChannelShell is closed for session");
-                return false;
+                return "ChannelShell closed";
             }
 
-            // 3. 마지막 활동 시간 확인 (60초 이상 무응답은 의심)
-            // 하지만 이것만으로는 끊지 않고 위 조건들과 조합해서 판단
-            return true;
+            // 3. ClientSession이 인증되어 있는지 확인
+            if (!session.clientSession.isAuthenticated()) {
+                return "ClientSession not authenticated";
+            }
+
+            // 정상
+            return null;
         } catch (Exception e) {
-            log.error("Error checking session health: {}", e.getMessage());
-            return false;
+            log.error("Error checking session health: {}", e.getMessage(), e);
+            return "Health check exception: " + e.getMessage();
         }
     }
 
-    private void handleUnhealthySession(String sessionId, TerminalSession session) {
-        cleanupSession(sessionId);
-        sendStatus(sessionId, "disconnected", "Connection lost (health check failed)");
+    private boolean isSessionHealthy(TerminalSession session) {
+        return getSessionUnhealthyReason(session) == null;
+    }
+
+    private void handleUnhealthySession(String sessionId, TerminalSession session, String reason) {
+        String detailedReason = String.format("Health check failed: %s", reason);
+        cleanupSession(sessionId, detailedReason);
+        sendStatus(sessionId, "disconnected", detailedReason);
     }
 
     @Override
@@ -238,16 +280,22 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
         TerminalSession session = sessions.get(sessionId);
 
         if (session == null) {
-            log.debug("Ping received for non-existent session: {}", sessionId);
+            log.warn("Ping received for non-existent session: {}", sessionId);
             return TerminalMessage.pong(sessionId, false);
         }
 
-        boolean healthy = isSessionHealthy(session);
+        String unhealthyReason = getSessionUnhealthyReason(session);
+        boolean healthy = (unhealthyReason == null);
+
         if (healthy) {
             session.updateActivity();
             log.trace("Ping successful for session: {}", sessionId);
         } else {
-            log.warn("Ping detected unhealthy session: {}", sessionId);
+            log.warn("Ping detected unhealthy session: {} | Reason: {} | LastActivity: {}s ago",
+                sessionId,
+                unhealthyReason,
+                Duration.between(session.lastActivity, Instant.now()).getSeconds()
+            );
         }
 
         return TerminalMessage.pong(sessionId, healthy);
@@ -283,6 +331,9 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
     private void startOutputReader(String sessionId, TerminalSession session) {
         outputReaderExecutor.submit(() -> {
             byte[] buffer = new byte[bufferSize];
+            String disconnectReason = "Unknown";
+            boolean hasError = false;
+
             try {
                 while (session.running && !Thread.currentThread().isInterrupted()) {
                     // Blocking read - 데이터가 있을 때 즉시 반환
@@ -293,18 +344,38 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
                         session.updateActivity();
                     } else if (read == -1) {
                         // Stream closed
+                        disconnectReason = "SSH output stream closed (EOF)";
+                        log.info("Output stream closed for session: {} | Duration: {}s",
+                            sessionId,
+                            Duration.between(session.createdAt, Instant.now()).getSeconds()
+                        );
                         break;
                     }
                 }
+
+                if (Thread.currentThread().isInterrupted()) {
+                    disconnectReason = "Output reader thread interrupted";
+                }
             } catch (IOException e) {
+                hasError = true;
+                disconnectReason = String.format("IO error in output reader: %s", e.getMessage());
+
                 if (session.running) {
-                    log.error("Output reader error for session {}: {}", sessionId, e.getMessage());
-                    sendError(sessionId, ErrorCode.NETWORK_ERROR, "Connection lost");
+                    log.error("Output reader error for session: {} | Error: {} | LastActivity: {}s ago",
+                        sessionId,
+                        e.getMessage(),
+                        Duration.between(session.lastActivity, Instant.now()).getSeconds(),
+                        e
+                    );
+                    sendError(sessionId, ErrorCode.NETWORK_ERROR, "Connection lost: " + e.getMessage());
                 }
             } finally {
                 if (session.running) {
-                    cleanupSession(sessionId);
-                    sendStatus(sessionId, "disconnected", "Connection closed");
+                    log.info("Output reader terminating for session: {} | Reason: {} | HasError: {}",
+                        sessionId, disconnectReason, hasError);
+
+                    cleanupSession(sessionId, disconnectReason);
+                    sendStatus(sessionId, "disconnected", disconnectReason);
                 }
             }
         });

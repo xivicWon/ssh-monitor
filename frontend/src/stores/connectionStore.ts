@@ -11,6 +11,9 @@ import type {
   SplitPane,
   SplitDirection,
 } from "@/types";
+import { useLogger } from "@/composables/useLogger";
+
+const logger = useLogger();
 
 const STORAGE_KEY = "ssh-monitor-connections";
 const STATE_STORAGE_KEY = "ssh-monitor-state";
@@ -88,7 +91,7 @@ export const useConnectionStore = defineStore("connection", () => {
         connections.value = parsed;
       }
     } catch (e) {
-      console.error("Failed to load connections from storage:", e);
+      logger.error("Store", "Failed to load connections from storage:", e);
     }
   }
 
@@ -96,7 +99,7 @@ export const useConnectionStore = defineStore("connection", () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(connections.value));
     } catch (e) {
-      console.error("Failed to save connections to storage:", e);
+      logger.error("Store", "Failed to save connections to storage:", e);
     }
   }
 
@@ -124,7 +127,7 @@ export const useConnectionStore = defineStore("connection", () => {
 
       localStorage.setItem(STATE_STORAGE_KEY, JSON.stringify(state));
     } catch (e) {
-      console.error("Failed to save state to storage:", e);
+      logger.error("Store", "Failed to save state to storage:", e);
     }
   }
 
@@ -167,12 +170,9 @@ export const useConnectionStore = defineStore("connection", () => {
 
       activeSessionId.value = state.activeSessionId;
 
-      console.log(
-        "[connectionStore] State restored from localStorage:",
-        state
-      );
+      logger.info("Store", "State restored from localStorage", { state });
     } catch (e) {
-      console.error("Failed to load state from storage:", e);
+      logger.error("Store", "Failed to load state from storage", { error: e instanceof Error ? e.message : String(e) });
     }
   }
 
@@ -298,20 +298,13 @@ export const useConnectionStore = defineStore("connection", () => {
   }
 
   function requestSyncToTerminal() {
-    console.log(
-      "[connectionStore] requestSyncToTerminal called, setting to true"
-    );
+    logger.debug("Store", "requestSyncToTerminal called, setting to true");
     syncToTerminalRequested.value = true;
-    console.log(
-      "[connectionStore] syncToTerminalRequested is now:",
-      syncToTerminalRequested.value
-    );
+    logger.debug("Store", "syncToTerminalRequested is now", { value: syncToTerminalRequested.value });
   }
 
   function clearSyncToTerminalRequest() {
-    console.log(
-      "[connectionStore] clearSyncToTerminalRequest called, setting to false"
-    );
+    logger.debug("Store", "clearSyncToTerminalRequest called, setting to false");
     syncToTerminalRequested.value = false;
   }
 

@@ -2,8 +2,10 @@ import { ref, onUnmounted } from 'vue'
 import { Client, IMessage, StompSubscription } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
 import type { TerminalMessage, TerminalConnectMessage, TerminalInputMessage, TerminalResizeMessage, DirectoryListRequest, DirectoryListResponse } from '@/types'
+import { useLogger } from './useLogger'
 
 const WS_URL = import.meta.env.VITE_WS_URL || '/ws'
+const logger = useLogger()
 
 interface SessionSubscriptions {
   terminal?: StompSubscription
@@ -31,22 +33,34 @@ export function useWebSocket() {
     onError?: (error: Error) => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      logger.info('WebSocket', 'Connecting to:', WS_URL)
+
       const stompClient = new Client({
         webSocketFactory: () => new SockJS(`${WS_URL}/terminal`),
         reconnectDelay: 5000,
         heartbeatIncoming: 10000,
         heartbeatOutgoing: 10000,
         onConnect: () => {
+          logger.info('WebSocket', 'Connected successfully')
           isConnected.value = true
           resolve()
         },
         onStompError: (frame) => {
+          logger.error('WebSocket', 'STOMP error:', frame.body)
           const error = new Error(frame.body || 'STOMP error')
           onError?.(error)
           reject(error)
         },
-        onWebSocketClose: () => {
+        onWebSocketClose: (event) => {
+          logger.warn('WebSocket', 'Connection closed', {
+            code: event?.code,
+            reason: event?.reason,
+            wasClean: event?.wasClean
+          })
           isConnected.value = false
+        },
+        onWebSocketError: (error) => {
+          logger.error('WebSocket', 'WebSocket error:', error)
         }
       })
 
@@ -63,14 +77,16 @@ export function useWebSocket() {
       throw new Error('WebSocket not connected')
     }
 
+    logger.info('WebSocket', 'Subscribing to session:', sId)
     sessionId.value = sId // 레거시 호환
 
     const subscription = client.value.subscribe(`/topic/terminal/${sId}`, (message: IMessage) => {
       try {
         const terminalMessage: TerminalMessage = JSON.parse(message.body)
+        logger.debug('WebSocket', `Message received for ${sId}:`, terminalMessage.type)
         onMessage(terminalMessage)
       } catch (e) {
-        console.error('Failed to parse terminal message:', e)
+        logger.error('WebSocket', 'Failed to parse terminal message:', e)
       }
     })
 
@@ -80,6 +96,7 @@ export function useWebSocket() {
 
     // unsubscribe 함수 반환
     return () => {
+      logger.info('WebSocket', 'Unsubscribing from session:', sId)
       subscription.unsubscribe()
       const subs = subscriptions.value.get(sId)
       if (subs) {
@@ -95,6 +112,13 @@ export function useWebSocket() {
     if (!client.value || !isConnected.value) {
       throw new Error('WebSocket not connected')
     }
+
+    logger.info('WebSocket', 'Sending connect:', {
+      sessionId: message.sessionId,
+      host: message.host,
+      port: message.port,
+      username: message.username
+    })
 
     client.value.publish({
       destination: '/app/terminal/connect',
@@ -117,6 +141,8 @@ export function useWebSocket() {
     if (!client.value || !isConnected.value) {
       return
     }
+
+    logger.info('WebSocket', 'Sending disconnect:', sId)
 
     client.value.publish({
       destination: '/app/terminal/disconnect',
@@ -148,7 +174,7 @@ export function useWebSocket() {
         const response: DirectoryListResponse = JSON.parse(message.body)
         onDirectory(response)
       } catch (e) {
-        console.error('Failed to parse directory response:', e)
+        logger.error('WebSocket', 'Failed to parse directory response:', e)
       }
     })
 
@@ -233,13 +259,16 @@ export function useWebSocket() {
     // 기존 타이머가 있으면 정리
     stopPingTimer(sId)
 
+    logger.debug('Ping', 'Starting ping timer for session:', sId)
+
     // 20초마다 ping 전송
     const intervalId = window.setInterval(() => {
+      logger.debug('Ping', 'Sending ping for session:', sId)
       sendPing(sId)
 
       // 10초 타임아웃 설정
       const timeoutId = window.setTimeout(() => {
-        console.warn(`Ping timeout for session ${sId}`)
+        logger.error('Ping', 'Timeout - No pong received for session:', sId)
         onTimeout()
       }, 10000)
 
@@ -256,6 +285,7 @@ export function useWebSocket() {
   function handlePong(sId: string) {
     const state = pingStates.value.get(sId)
     if (state?.timeoutId) {
+      logger.debug('Ping', 'Pong received for session:', sId)
       clearTimeout(state.timeoutId)
     }
     pingStates.value.set(sId, {
@@ -267,6 +297,7 @@ export function useWebSocket() {
   function stopPingTimer(sId: string) {
     const state = pingStates.value.get(sId)
     if (state) {
+      logger.debug('Ping', 'Stopping ping timer for session:', sId)
       if (state.intervalId) clearInterval(state.intervalId)
       if (state.timeoutId) clearTimeout(state.timeoutId)
       pingStates.value.delete(sId)

@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia'
 import { useConnectionStore } from '@/stores/connectionStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { createTerminalInstance, type TerminalInstance } from '@/composables/useTerminalFactory'
-import { useWebSocket, useSshConnection } from '@/composables'
+import { useWebSocket, useSshConnection, useLogger } from '@/composables'
 import type { TerminalSession, TerminalMessage, DirectoryListResponse } from '@/types'
 
 const props = defineProps<{
@@ -32,6 +32,7 @@ const {
   stopPingTimer,
   disconnectSession
 } = useWebSocket()
+const logger = useLogger()
 
 const containerRef = ref<HTMLElement | null>(null)
 const terminalInstance = ref<TerminalInstance | null>(null)
@@ -64,13 +65,17 @@ const connection = computed(() =>
 function handleTerminalMessage(message: TerminalMessage) {
   if (!terminalInstance.value) return
 
+  logger.info('Terminal', `[${props.session.id}] Message: ${message.type}`, { message: message.message || '', sessionId: props.session.sessionId })
+
   switch (message.type) {
     case 'connected':
+      logger.info('Terminal', `[${props.session.id}] SSH connection established`, { sessionId: props.session.sessionId })
       connectionStore.updateSessionStatus(props.session.id, 'connected')
       terminalInstance.value.writeln('\r\n\x1b[32m✓ SSH 연결 성공\x1b[0m\r\n')
 
       // Ping 타이머 시작
       startPingTimer(props.session.sessionId, () => {
+        logger.error('Terminal', `[${props.session.id}] Ping timeout - connection lost`, { sessionId: props.session.sessionId })
         connectionStore.updateSessionStatus(props.session.id, 'error')
         terminalInstance.value?.writeln('\r\n\x1b[31m✕ 연결 타임아웃\x1b[0m\r\n')
       })
@@ -97,17 +102,20 @@ function handleTerminalMessage(message: TerminalMessage) {
       break
 
     case 'error':
+      logger.error('Terminal', `[${props.session.id}] Error: ${message.message}`, { errorCode: message.errorCode, sessionId: props.session.sessionId })
       connectionStore.updateSessionStatus(props.session.id, 'error')
       terminalInstance.value.writeln(`\r\n\x1b[31m✕ 오류: ${message.message}\x1b[0m\r\n`)
       break
 
     case 'disconnected':
+      logger.warn('Terminal', `[${props.session.id}] Disconnected: ${message.message}`, { sessionId: props.session.sessionId })
       connectionStore.updateSessionStatus(props.session.id, 'disconnected')
       terminalInstance.value.writeln('\r\n\x1b[33m⚠ SSH 연결 종료\x1b[0m\r\n')
       break
 
     case 'status':
       if (message.status === 'disconnected') {
+        logger.warn('Terminal', `[${props.session.id}] Status disconnected: ${message.message}`, { sessionId: props.session.sessionId })
         connectionStore.updateSessionStatus(props.session.id, 'disconnected')
         terminalInstance.value.writeln(`\r\n\x1b[33m⚠ ${message.message || 'Session ended'}\x1b[0m\r\n`)
       }
@@ -116,6 +124,7 @@ function handleTerminalMessage(message: TerminalMessage) {
     case 'pong':
       handlePong(props.session.sessionId)
       if (message.data === 'false' || message.status === 'unhealthy') {
+        logger.error('Terminal', `[${props.session.id}] Unhealthy pong received`, { status: message.status, sessionId: props.session.sessionId })
         connectionStore.updateSessionStatus(props.session.id, 'error')
         terminalInstance.value.writeln('\r\n\x1b[31m✕ 연결 상태 확인 실패\x1b[0m\r\n')
       }
@@ -123,6 +132,7 @@ function handleTerminalMessage(message: TerminalMessage) {
 
     case 'health_check':
       if (message.status === 'unhealthy') {
+        logger.error('Terminal', `[${props.session.id}] Health check failed: ${message.message}`, { sessionId: props.session.sessionId })
         connectionStore.updateSessionStatus(props.session.id, 'disconnected')
         terminalInstance.value.writeln('\r\n\x1b[33m⚠ 연결이 끊어졌습니다\x1b[0m\r\n')
       }
@@ -220,6 +230,8 @@ async function connectToServer() {
   const conn = connection.value
   if (!conn || !terminalInstance.value) return
 
+  logger.info('Terminal', `[${props.session.id}] Starting connection`, { username: conn.username, host: conn.host, port: conn.port, sessionId: props.session.sessionId })
+
   connectionStore.updateSessionStatus(props.session.id, 'connecting')
   terminalInstance.value.clear()
   terminalInstance.value.writeln(`\x1b[36m연결 중: ${conn.username}@${conn.host}:${conn.port}\x1b[0m\r\n`)
@@ -227,18 +239,22 @@ async function connectToServer() {
   try {
     // WebSocket 연결 (이미 연결되어 있으면 스킵)
     if (!wsConnected.value) {
+      logger.info('Terminal', `[${props.session.id}] WebSocket not connected, connecting...`, { sessionId: props.session.sessionId })
       await connect(handleTerminalMessage, () => {
+        logger.error('Terminal', `[${props.session.id}] WebSocket connection error`, { sessionId: props.session.sessionId })
         connectionStore.updateSessionStatus(props.session.id, 'error')
       })
     }
 
     // 세션 구독
+    logger.info('Terminal', `[${props.session.id}] Subscribing to channels`, { sessionId: props.session.sessionId })
     subscribeToSession(props.session.sessionId, handleTerminalMessage)
     subscribeToDirectory(props.session.sessionId, handleDirectoryResponse)
     subscribeToPwd(props.session.sessionId, handlePwdResponse)
 
     // SSH 연결 요청
     const { cols, rows } = terminalInstance.value.getDimensions()
+    logger.info('Terminal', `[${props.session.id}] Sending SSH connect request`, { cols, rows, sessionId: props.session.sessionId })
     sendConnect({
       sessionId: props.session.sessionId,
       host: conn.host,
@@ -249,6 +265,7 @@ async function connectToServer() {
       terminalConfig: { cols, rows, term: 'xterm-256color' }
     })
   } catch (e) {
+    logger.error('Terminal', `[${props.session.id}] Connection failed`, { error: e instanceof Error ? e.message : String(e), sessionId: props.session.sessionId })
     connectionStore.updateSessionStatus(props.session.id, 'error')
     terminalInstance.value.writeln(`\r\n\x1b[31m✕ WebSocket 연결 실패: ${e instanceof Error ? e.message : 'Unknown error'}\x1b[0m\r\n`)
   }
