@@ -87,4 +87,43 @@ public record TerminalMessage(
             null
         );
     }
+
+    public static TerminalMessage ping(String sessionId) {
+        return new TerminalMessage(
+            "ping",
+            sessionId,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
+    public static TerminalMessage pong(String sessionId, boolean healthy) {
+        return new TerminalMessage(
+            "pong",
+            sessionId,
+            String.valueOf(healthy),
+            healthy ? "healthy" : "unhealthy",
+            null,
+            null,
+            null,
+            null
+        );
+    }
+
+    public static TerminalMessage healthCheck(String sessionId, String status) {
+        return new TerminalMessage(
+            "health_check",
+            sessionId,
+            null,
+            status,
+            status.equals("unhealthy") ? "Session health check failed" : null,
+            null,
+            null,
+            null
+        );
+    }
 }

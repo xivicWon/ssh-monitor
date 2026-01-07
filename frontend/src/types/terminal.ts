@@ -37,6 +37,9 @@ export type TerminalMessageType =
   | 'error'
   | 'disconnected'
   | 'resized'
+  | 'ping'
+  | 'pong'
+  | 'health_check'
 
 export interface TerminalMessage {
   type: TerminalMessageType

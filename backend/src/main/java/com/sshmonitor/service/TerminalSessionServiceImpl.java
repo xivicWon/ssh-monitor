@@ -193,6 +193,66 @@ public class TerminalSessionServiceImpl implements TerminalSessionService {
         });
     }
 
+    @Scheduled(fixedRate = 15000)
+    public void healthCheckAllSessions() {
+        log.trace("Running health check on {} sessions", sessions.size());
+        sessions.forEach((sessionId, session) -> {
+            if (!isSessionHealthy(session)) {
+                log.warn("Unhealthy session detected: {}", sessionId);
+                handleUnhealthySession(sessionId, session);
+            }
+        });
+    }
+
+    private boolean isSessionHealthy(TerminalSession session) {
+        try {
+            // 1. ClientSession이 열려있는지 확인
+            if (!session.clientSession.isOpen()) {
+                log.debug("ClientSession is closed for session");
+                return false;
+            }
+
+            // 2. ChannelShell이 열려있는지 확인
+            if (!session.channel.isOpen()) {
+                log.debug("ChannelShell is closed for session");
+                return false;
+            }
+
+            // 3. 마지막 활동 시간 확인 (60초 이상 무응답은 의심)
+            // 하지만 이것만으로는 끊지 않고 위 조건들과 조합해서 판단
+            return true;
+        } catch (Exception e) {
+            log.error("Error checking session health: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void handleUnhealthySession(String sessionId, TerminalSession session) {
+        cleanupSession(sessionId);
+        sendStatus(sessionId, "disconnected", "Connection lost (health check failed)");
+    }
+
+    @Override
+    public TerminalMessage handlePing(String sessionId) {
+        log.trace("Handling ping for session: {}", sessionId);
+        TerminalSession session = sessions.get(sessionId);
+
+        if (session == null) {
+            log.debug("Ping received for non-existent session: {}", sessionId);
+            return TerminalMessage.pong(sessionId, false);
+        }
+
+        boolean healthy = isSessionHealthy(session);
+        if (healthy) {
+            session.updateActivity();
+            log.trace("Ping successful for session: {}", sessionId);
+        } else {
+            log.warn("Ping detected unhealthy session: {}", sessionId);
+        }
+
+        return TerminalMessage.pong(sessionId, healthy);
+    }
+
     private ClientSession createClientSession(TerminalConnectRequest request) throws Exception {
         ClientSession session = sshClient.connect(
             request.username(),

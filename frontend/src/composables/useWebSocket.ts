@@ -11,11 +11,18 @@ interface SessionSubscriptions {
   pwd?: StompSubscription
 }
 
+interface SessionPingState {
+  intervalId?: number
+  lastPongTime?: number
+  timeoutId?: number
+}
+
 // 싱글톤 상태 (모든 컴포넌트에서 공유)
 const isConnected = ref(false)
 const client = ref<Client | null>(null)
 const sessionId = ref<string | null>(null) // 레거시 호환용
 const subscriptions = ref<Map<string, SessionSubscriptions>>(new Map())
+const pingStates = ref<Map<string, SessionPingState>>(new Map())
 
 export function useWebSocket() {
 
@@ -211,6 +218,61 @@ export function useWebSocket() {
     })
   }
 
+  function sendPing(sId: string) {
+    if (!client.value || !isConnected.value) {
+      return
+    }
+
+    client.value.publish({
+      destination: '/app/terminal/ping',
+      body: sId
+    })
+  }
+
+  function startPingTimer(sId: string, onTimeout: () => void) {
+    // 기존 타이머가 있으면 정리
+    stopPingTimer(sId)
+
+    // 20초마다 ping 전송
+    const intervalId = window.setInterval(() => {
+      sendPing(sId)
+
+      // 10초 타임아웃 설정
+      const timeoutId = window.setTimeout(() => {
+        console.warn(`Ping timeout for session ${sId}`)
+        onTimeout()
+      }, 10000)
+
+      const currentState = pingStates.value.get(sId) || {}
+      pingStates.value.set(sId, {
+        ...currentState,
+        timeoutId
+      })
+    }, 20000)
+
+    pingStates.value.set(sId, { intervalId })
+  }
+
+  function handlePong(sId: string) {
+    const state = pingStates.value.get(sId)
+    if (state?.timeoutId) {
+      clearTimeout(state.timeoutId)
+    }
+    pingStates.value.set(sId, {
+      ...state,
+      lastPongTime: Date.now()
+    })
+  }
+
+  function stopPingTimer(sId: string) {
+    const state = pingStates.value.get(sId)
+    if (state) {
+      if (state.intervalId) clearInterval(state.intervalId)
+      if (state.timeoutId) clearTimeout(state.timeoutId)
+      pingStates.value.delete(sId)
+    }
+  }
+
   // 특정 세션의 모든 구독 해제
   function unsubscribeSession(sId: string) {
     const subs = subscriptions.value.get(sId)
@@ -226,6 +288,7 @@ export function useWebSocket() {
   function disconnectSession(sId: string) {
     sendDisconnect(sId)
     unsubscribeSession(sId)
+    stopPingTimer(sId)
   }
 
   // 전체 연결 해제 (레거시 호환 + 모든 세션)
@@ -238,6 +301,11 @@ export function useWebSocket() {
       subs.pwd?.unsubscribe()
     })
     subscriptions.value.clear()
+
+    // 모든 ping 타이머 정리
+    pingStates.value.forEach((_, sId) => {
+      stopPingTimer(sId)
+    })
 
     // 레거시 단일 세션 처리
     if (sessionId.value) {
@@ -260,6 +328,7 @@ export function useWebSocket() {
     isConnected,
     sessionId,
     subscriptions,
+    pingStates,
     connect,
     subscribeToSession,
     subscribeToDirectory,
@@ -270,6 +339,10 @@ export function useWebSocket() {
     sendResize,
     sendListDirectory,
     sendPwd,
+    sendPing,
+    startPingTimer,
+    handlePong,
+    stopPingTimer,
     unsubscribeSession,
     disconnectSession,
     disconnect

@@ -92,4 +92,15 @@ public class TerminalWebSocketController {
             path != null ? path : ""
         );
     }
+
+    @MessageMapping("/terminal/ping")
+    public void ping(String sessionId) {
+        log.trace("Terminal ping request: {}", sessionId);
+
+        TerminalMessage response = terminalSessionService.handlePing(sessionId);
+        messagingTemplate.convertAndSend(
+            "/topic/terminal/" + sessionId,
+            response
+        );
+    }
 }

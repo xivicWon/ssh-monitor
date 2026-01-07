@@ -19,4 +19,6 @@ public interface TerminalSessionService {
     DirectoryListResponse listDirectory(DirectoryListRequest request);
 
     String getCurrentDirectory(String sessionId);
+
+    TerminalMessage handlePing(String sessionId);
 }

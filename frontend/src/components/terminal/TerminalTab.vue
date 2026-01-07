@@ -27,6 +27,9 @@ const {
   sendResize,
   sendListDirectory,
   sendPwd,
+  startPingTimer,
+  handlePong,
+  stopPingTimer,
   disconnectSession
 } = useWebSocket()
 
@@ -66,6 +69,12 @@ function handleTerminalMessage(message: TerminalMessage) {
       connectionStore.updateSessionStatus(props.session.id, 'connected')
       terminalInstance.value.writeln('\r\n\x1b[32m✓ SSH 연결 성공\x1b[0m\r\n')
 
+      // Ping 타이머 시작
+      startPingTimer(props.session.sessionId, () => {
+        connectionStore.updateSessionStatus(props.session.id, 'error')
+        terminalInstance.value?.writeln('\r\n\x1b[31m✕ 연결 타임아웃\x1b[0m\r\n')
+      })
+
       // 연결 성공 시 서버 정보 및 디렉토리 목록 요청
       setTimeout(async () => {
         connectionStore.setSessionLoadingDirectory(props.session.id, true)
@@ -101,6 +110,21 @@ function handleTerminalMessage(message: TerminalMessage) {
       if (message.status === 'disconnected') {
         connectionStore.updateSessionStatus(props.session.id, 'disconnected')
         terminalInstance.value.writeln(`\r\n\x1b[33m⚠ ${message.message || 'Session ended'}\x1b[0m\r\n`)
+      }
+      break
+
+    case 'pong':
+      handlePong(props.session.sessionId)
+      if (message.data === 'false' || message.status === 'unhealthy') {
+        connectionStore.updateSessionStatus(props.session.id, 'error')
+        terminalInstance.value.writeln('\r\n\x1b[31m✕ 연결 상태 확인 실패\x1b[0m\r\n')
+      }
+      break
+
+    case 'health_check':
+      if (message.status === 'unhealthy') {
+        connectionStore.updateSessionStatus(props.session.id, 'disconnected')
+        terminalInstance.value.writeln('\r\n\x1b[33m⚠ 연결이 끊어졌습니다\x1b[0m\r\n')
       }
       break
   }
@@ -350,6 +374,9 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // Ping 타이머 정리
+  stopPingTimer(props.session.sessionId)
+
   // ResizeObserver 정리
   resizeObserver?.disconnect()
 
